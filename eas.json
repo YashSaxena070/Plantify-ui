@@ -1,0 +1,33 @@
+{
+  "cli": {
+    "version": ">= 20.5.1",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_PLANTNET_API_KEY": "2b100nUIDbYgV8adMWePQQe1pu",
+        "EXPO_PUBLIC_PERENUAL_API_KEY": "sk-whtl6a4bf6c64d66918621"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_PLANTNET_API_KEY": "2b100nUIDbYgV8adMWePQQe1pu",
+        "EXPO_PUBLIC_PERENUAL_API_KEY": "sk-whtl6a4bf6c64d66918621"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_PLANTNET_API_KEY": "2b100nUIDbYgV8adMWePQQe1pu",
+        "EXPO_PUBLIC_PERENUAL_API_KEY": "sk-whtl6a4bf6c64d66918621"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
