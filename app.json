@@ -2,7 +2,7 @@
   "expo": {
     "name": "Plantify",
     "slug": "Plantify",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "plantify",
@@ -12,14 +12,14 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.explified.plantify",
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
-      "package": "com.explified.plantify"
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "static",

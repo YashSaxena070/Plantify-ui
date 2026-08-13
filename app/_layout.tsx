@@ -30,6 +30,8 @@ export const UserContext = createContext({
   removeRecentScan: (id: string) => { },
   reminders: [] as any[],
   saveReminder: (reminder: any) => { },
+  addHealthScan: (plantName: string, score: number, imageUri?: string, categoryRatings?: any) => { },
+  updateCategoryRatings: (plantName: string, ratings: any) => { },
   isDbSyncing: false,
   dbSyncProgress: 0,
   dbSyncStatusText: '',
@@ -102,16 +104,14 @@ export default function RootLayout() {
           setUserEmail(storedEmail);
         }
         const storedPlants = await AsyncStorage.getItem('@saved_plants');
+        let parsedPlants = [];
         if (storedPlants) {
           const parsed = JSON.parse(storedPlants);
           if (Array.isArray(parsed)) {
-            const fixed = parsed.map((p: any) => ({
+            parsedPlants = parsed.map((p: any) => ({
               ...p,
               imageUri: resolveLocalUri(p.imageUri) || p.imageUri,
             }));
-            setSavedPlants(fixed);
-          } else {
-            setSavedPlants(parsed);
           }
         }
         const storedScans = await AsyncStorage.getItem('@recent_scans');
@@ -127,10 +127,22 @@ export default function RootLayout() {
             setRecentScans(parsed);
           }
         }
+
         const storedReminders = await AsyncStorage.getItem('@reminders');
+        let parsedReminders = [];
         if (storedReminders) {
-          setReminders(JSON.parse(storedReminders));
+          const parsed = JSON.parse(storedReminders);
+          if (Array.isArray(parsed)) {
+            parsedReminders = parsed;
+          }
         }
+
+        // Clean out legacy hardcoded test plant if present
+        const cleanPlants = parsedPlants.filter((p: any) => p.id !== 'test-snake-plant');
+        const cleanReminders = parsedReminders.filter((r: any) => r.plantName !== 'Bedroom Snake Plant');
+
+        setSavedPlants(cleanPlants);
+        setReminders(cleanReminders);
       } catch (err) {
         console.error('Failed to load AsyncStorage data:', err);
       }
@@ -170,11 +182,35 @@ export default function RootLayout() {
       const fixedPlant = {
         ...plant,
         imageUri: resolveLocalUri(plant.imageUri) || plant.imageUri,
+        lastScannedDate: plant.lastScannedDate || Date.now(),
       };
       setSavedPlants((prev) => {
-        if (prev.some((p) => p.name === fixedPlant.name)) return prev;
-        const updated = [...prev, fixedPlant];
+        const alreadyExists = prev.some((p) => p.name === fixedPlant.name);
+        let updated;
+        if (alreadyExists) {
+          updated = prev.map((p) => p.name === fixedPlant.name ? { ...p, ...fixedPlant } : p);
+        } else {
+          updated = [...prev, fixedPlant];
+        }
         AsyncStorage.setItem('@saved_plants', JSON.stringify(updated)).catch(console.error);
+        
+        // Auto-create matching care reminder
+        setReminders((prevRem) => {
+          if (prevRem.some((r) => r.plantName === fixedPlant.name)) return prevRem;
+          const autoReminder = {
+            plantName: fixedPlant.name,
+            wateringFreq: 'daily',
+            wateringTime: 'morning',
+            fertilizerFreq: 'none',
+            enableNotifications: true,
+            lastWatered: Date.now() - 24 * 60 * 60 * 1000, // Seed as watered yesterday (due today) for testing
+            snoozedUntil: undefined,
+          };
+          const updatedRem = [...prevRem, autoReminder];
+          AsyncStorage.setItem('@reminders', JSON.stringify(updatedRem)).catch(console.error);
+          return updatedRem;
+        });
+
         return updated;
       });
     } catch (err) {
@@ -241,6 +277,61 @@ export default function RootLayout() {
     }
   };
 
+  const addHealthScan = async (
+    plantName: string, 
+    score: number, 
+    imageUri?: string,
+    categoryRatings?: { water: number; sunlight: number; humidity: number; growth: number; overall: number }
+  ) => {
+    try {
+      setSavedPlants((prev) => {
+        const updated = prev.map((p) => {
+          if (p.name === plantName || p.botanicalName === plantName) {
+            const history = Array.isArray(p.healthHistory) ? p.healthHistory : [];
+            return {
+              ...p,
+              confidence: score,
+              lastScannedDate: Date.now(),
+              imageUri: imageUri || p.imageUri,
+              healthHistory: [...history, { date: Date.now(), score: Math.round(score) }],
+              categoryRatings: categoryRatings || p.categoryRatings,
+            };
+          }
+          return p;
+        });
+        AsyncStorage.setItem('@saved_plants', JSON.stringify(updated)).catch(console.error);
+        return updated;
+      });
+    } catch (err) {
+      console.error('Failed to add health scan:', err);
+    }
+  };
+
+  const updateCategoryRatings = async (
+    plantName: string,
+    ratings: { water?: number; sunlight?: number; humidity?: number; growth?: number; overall?: number }
+  ) => {
+    try {
+      setSavedPlants((prev) => {
+        const updated = prev.map((p) => {
+          if (p.name === plantName || p.botanicalName === plantName) {
+            const currentRatings = p.categoryRatings || { water: 4, sunlight: 4, humidity: 3, growth: 3, overall: 4 };
+            const newRatings = { ...currentRatings, ...ratings };
+            return {
+              ...p,
+              categoryRatings: newRatings,
+            };
+          }
+          return p;
+        });
+        AsyncStorage.setItem('@saved_plants', JSON.stringify(updated)).catch(console.error);
+        return updated;
+      });
+    } catch (err) {
+      console.error('Failed to update category ratings:', err);
+    }
+  };
+
   const [loaded, error] = useFonts({
     ...Ionicons.font,
     'Ionicons': require('@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf'),
@@ -284,6 +375,8 @@ export default function RootLayout() {
       removeRecentScan,
       reminders, 
       saveReminder,
+      addHealthScan,
+      updateCategoryRatings,
       isDbSyncing,
       dbSyncProgress,
       dbSyncStatusText

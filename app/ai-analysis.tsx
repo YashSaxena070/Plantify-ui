@@ -2,16 +2,63 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Easing, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Dimensions, Easing, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useUser } from './_layout';
 
 const { width } = Dimensions.get('window');
 
+function isPlantMatching(bestMatch: any, targetName: string): boolean {
+  if (!targetName || !targetName.trim()) return true;
+
+  const targetLower = targetName.toLowerCase().trim();
+  const commonNames: string[] = bestMatch?.species?.commonNames || [];
+  const scientificName = (bestMatch?.species?.scientificNameWithoutAuthor || '').toLowerCase();
+  const familyName = (bestMatch?.species?.family?.scientificNameWithoutAuthor || '').toLowerCase();
+  const genusName = (bestMatch?.species?.genus?.scientificNameWithoutAuthor || '').toLowerCase();
+
+  const allIdentifiedText = [
+    scientificName,
+    familyName,
+    genusName,
+    ...commonNames.map((c) => c.toLowerCase()),
+  ].join(' ');
+
+  if (allIdentifiedText.includes(targetLower) || targetLower.includes(scientificName)) {
+    return true;
+  }
+
+  const stopWords = new Set(['plant', 'tree', 'flower', 'bedroom', 'office', 'my', 'indoor', 'house', 'green']);
+  const targetWords = targetLower
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !stopWords.has(w));
+
+  if (targetWords.length === 0) return true;
+
+  const wordMatch = targetWords.some((word) => allIdentifiedText.includes(word));
+  if (wordMatch) return true;
+
+  const identifiedWords = commonNames
+    .join(' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !stopWords.has(w));
+
+  return identifiedWords.some((word) => targetLower.includes(word));
+}
+
 export default function AIAnalysisScreen() {
   const router = useRouter();
-  const { imageUri, plantResult } = useLocalSearchParams<{
+  const { addHealthScan } = useUser();
+  const [showMismatchModal, setShowMismatchModal] = useState(false);
+  const { imageUri, plantResult, isRescan, targetPlantName } = useLocalSearchParams<{
     imageUri?: string;
     plantResult?: string;
+    isRescan?: string;
+    targetPlantName?: string;
   }>();
 
   let plantData = null;
@@ -237,17 +284,51 @@ export default function AIAnalysisScreen() {
     }, 4400);
 
     const t5 = setTimeout(() => {
-      router.replace({
-        pathname: "/plant-details",
-        params: {
-          imageUri: imageUri ? encodeURIComponent(imageUri) : '',
-          commonName,
-          scientificName,
-          confidence,
-          plantResult,
-          fromFlow: "true",
-        },
-      });
+      if (isRescan === 'true') {
+        const targetName = targetPlantName || commonName;
+        const isMatch = isPlantMatching(bestMatch, targetName);
+
+        if (!isMatch) {
+          setShowMismatchModal(true);
+          return;
+        }
+
+        const scoreVal = Math.max(80, Math.min(99, Math.round(parseFloat(confidence) || 94)));
+        const aiCategoryRatings = {
+          water: scoreVal >= 90 ? 5 : (scoreVal >= 80 ? 4 : 3),
+          sunlight: scoreVal >= 88 ? 5 : (scoreVal >= 78 ? 4 : 3),
+          humidity: scoreVal >= 85 ? 4 : (scoreVal >= 70 ? 3 : 2),
+          growth: scoreVal >= 92 ? 5 : (scoreVal >= 82 ? 4 : 3),
+          overall: Math.max(1, Math.min(5, Math.round(scoreVal / 20))),
+        };
+        addHealthScan(targetName, scoreVal, imageUri, aiCategoryRatings);
+
+        router.replace({
+          pathname: "/plant-details",
+          params: {
+            imageUri: imageUri ? encodeURIComponent(imageUri) : '',
+            commonName: targetName,
+            scientificName,
+            confidence: String(scoreVal),
+            healthScore: String(scoreVal),
+            showHealthScoreDirectly: 'true',
+            fromGarden: 'true',
+            plantResult,
+          },
+        });
+      } else {
+        router.replace({
+          pathname: "/plant-details",
+          params: {
+            imageUri: imageUri ? encodeURIComponent(imageUri) : '',
+            commonName,
+            scientificName,
+            confidence,
+            plantResult,
+            fromFlow: "true",
+          },
+        });
+      }
     }, 4900);
 
     return () => {
@@ -465,6 +546,74 @@ export default function AIAnalysisScreen() {
           </Text>
         </View>
       </ScrollView>
+
+      {/* Mismatch Alert Modal */}
+      <Modal
+        visible={showMismatchModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMismatchModal(false)}
+      >
+        <View style={styles.mismatchOverlay}>
+          <View style={styles.mismatchCard}>
+            <View style={styles.mismatchIconBg}>
+              <Ionicons name="alert-circle" size={32} color="#D97706" />
+            </View>
+
+            <Text style={styles.mismatchTitle}>Plant Photo Mismatch ⚠️</Text>
+            <Text style={styles.mismatchSub}>
+              This photo does not appear to match your saved plant.
+            </Text>
+
+            <View style={styles.mismatchComparisonBox}>
+              <View style={styles.mismatchRow}>
+                <Text style={styles.mismatchLabel}>Target Plant:</Text>
+                <Text style={styles.mismatchTargetText}>{targetPlantName || 'Saved Plant'}</Text>
+              </View>
+              <View style={styles.mismatchDivider} />
+              <View style={styles.mismatchRow}>
+                <Text style={styles.mismatchLabel}>Photo Identified:</Text>
+                <Text style={styles.mismatchIdentifiedText}>{commonName} ({scientificName})</Text>
+              </View>
+            </View>
+
+            <Text style={styles.mismatchNotice}>
+              To update health timeline and score, please scan or upload a photo of your <Text style={{ fontWeight: '800' }}>{targetPlantName || 'saved plant'}</Text>.
+            </Text>
+
+            <View style={styles.mismatchBtnRow}>
+              <TouchableOpacity
+                style={styles.mismatchRetryBtn}
+                activeOpacity={0.85}
+                onPress={() => {
+                  setShowMismatchModal(false);
+                  router.replace({
+                    pathname: '/upload-photo',
+                    params: {
+                      isRescan: 'true',
+                      targetPlantName: targetPlantName || '',
+                    },
+                  });
+                }}
+              >
+                <Ionicons name="camera-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <Text style={styles.mismatchRetryText}>Try Rescan Again</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.mismatchCancelBtn}
+                activeOpacity={0.7}
+                onPress={() => {
+                  setShowMismatchModal(false);
+                  router.back();
+                }}
+              >
+                <Text style={styles.mismatchCancelText}>Cancel & Go Back</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -806,5 +955,120 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#8CA696',
     fontWeight: '600',
+  },
+  mismatchOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  mismatchCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 340,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  mismatchIconBg: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#FEF3C7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1.5,
+    borderColor: '#FDE68A',
+  },
+  mismatchTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1C3A27',
+    textAlign: 'center',
+  },
+  mismatchSub: {
+    fontSize: 12,
+    color: '#718E7B',
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  mismatchComparisonBox: {
+    backgroundColor: '#F8FBF7',
+    borderRadius: 16,
+    padding: 14,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#EBF2EA',
+    marginBottom: 14,
+  },
+  mismatchRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  mismatchLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8CA696',
+  },
+  mismatchTargetText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1E5322',
+  },
+  mismatchIdentifiedText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#D97706',
+    flex: 1,
+    textAlign: 'right',
+    marginLeft: 8,
+  },
+  mismatchDivider: {
+    height: 1,
+    backgroundColor: '#EBF2EA',
+    marginVertical: 10,
+  },
+  mismatchNotice: {
+    fontSize: 11,
+    color: '#5A7F66',
+    textAlign: 'center',
+    lineHeight: 16,
+    marginBottom: 20,
+  },
+  mismatchBtnRow: {
+    width: '100%',
+    gap: 10,
+  },
+  mismatchRetryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1E5322',
+    paddingVertical: 14,
+    borderRadius: 16,
+  },
+  mismatchRetryText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  mismatchCancelBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  mismatchCancelText: {
+    color: '#8CA696',
+    fontWeight: '700',
+    fontSize: 13,
   },
 });

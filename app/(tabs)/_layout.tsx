@@ -23,10 +23,10 @@ export default function TabLayout() {
           left: 0,
           right: 0,
           backgroundColor: '#FFFFFF',
-          height: Platform.OS === 'ios' ? 90 : 70,
+          height: 70,
           borderTopWidth: 1,
           borderTopColor: '#F0F5EF',
-          paddingBottom: Platform.OS === 'ios' ? 28 : 10,
+          paddingBottom: 10,
           paddingTop: 10,
           shadowColor: '#1C3A27',
           shadowOffset: { width: 0, height: -4 },
@@ -60,9 +60,9 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="my-plants"
+        name="my-garden"
         options={{
-          title: 'My Plants',
+          title: 'My Garden',
           tabBarIcon: ({ color }) => (
             <Image
               source={require('@/assets/images/my-plant.png')}
@@ -73,7 +73,7 @@ export default function TabLayout() {
           ),
           tabBarLabel: ({ color, focused }) => (
             <Text style={{ color, fontWeight: focused ? '800' : '500', fontSize: 10 }}>
-              My Plants
+              My Garden
             </Text>
           ),
         }}

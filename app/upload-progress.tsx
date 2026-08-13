@@ -18,7 +18,11 @@ const TIPS = [
 
 export default function UploadProgressScreen() {
   const router = useRouter();
-  const { imageUri: rawImageUri } = useLocalSearchParams<{ imageUri?: string }>();
+  const { imageUri: rawImageUri, isRescan, targetPlantName } = useLocalSearchParams<{
+    imageUri?: string;
+    isRescan?: string;
+    targetPlantName?: string;
+  }>();
   const imageUri = rawImageUri || 'https://images.unsplash.com/photo-1596547609652-9cf5d8d76921?q=80&w=600&auto=format&fit=crop';
   
   const [progress, setProgress] = useState(0);
@@ -91,6 +95,8 @@ export default function UploadProgressScreen() {
         params: {
           imageUri: persistentImageUri,
           plantResult: apiResult,
+          isRescan: isRescan || '',
+          targetPlantName: targetPlantName || '',
         },
       });
     }

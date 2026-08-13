@@ -1,14 +1,37 @@
+import WeatherCareCard from '@/components/WeatherCareCard';
+import { getWateringCountdown } from '@/services/plantHealthService';
 import { plantService } from '@/services/plantService';
 import { SQLitePlant as Plant } from '@/types/plant';
 import { Camera } from 'expo-camera';
-import * as Location from 'expo-location';
 import { Image } from 'expo-image';
+import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Dimensions, FlatList, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Dimensions, FlatList, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../_layout';
+
+function formatChatMessage(text: string | null | undefined, textStyle: any) {
+  if (!text) return null;
+  const cleanStr = String(text).replace(/\*\*/g, '');
+  const lines = cleanStr.split('\n');
+  return lines.map((line, idx) => {
+    const trimmed = line.trim();
+    let displayLine = line;
+    if (trimmed.startsWith('* ')) {
+      displayLine = '• ' + trimmed.slice(2);
+    } else if (trimmed.startsWith('- ')) {
+      displayLine = '• ' + trimmed.slice(2);
+    }
+    return (
+      <Text key={idx} style={textStyle}>
+        {displayLine}
+      </Text>
+    );
+  });
+}
 
 const { width } = Dimensions.get('window');
 
@@ -26,7 +49,7 @@ const CATEGORIES = [
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { userName, recentScans, removeRecentScan, reminders, isDbSyncing, dbSyncProgress, dbSyncStatusText } = useUser();
+  const { userName, recentScans, removeRecentScan, reminders, isDbSyncing, dbSyncProgress, dbSyncStatusText, savedPlants } = useUser();
   const [isNotiVisible, setIsNotiVisible] = useState(false);
   const slideAnim = useRef(new Animated.Value(width * 0.75)).current;
 
@@ -41,6 +64,103 @@ export default function HomeScreen() {
   const [homeSearchResults, setHomeSearchResults] = useState<Plant[]>([]);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [isExplorerFocused, setIsExplorerFocused] = useState(false);
+
+  // Global Chat States
+  const [isGlobalChatVisible, setIsGlobalChatVisible] = useState(false);
+  const [globalChatMessages, setGlobalChatMessages] = useState<Array<{ id: string; sender: 'user' | 'ai'; text: string }>>([
+    {
+      id: 'welcome',
+      sender: 'ai',
+      text: 'Hello! I am your AI Doctor 🩺. I am here to help you with any general plant care advice, disease diagnosis tips, watering schedules, or botanical questions. What is on your mind today?',
+    },
+  ]);
+  const [globalChatInput, setGlobalChatInput] = useState('');
+  const [isGlobalAiTyping, setIsGlobalAiTyping] = useState(false);
+
+  const handleSendGlobalChatMessage = async (textToSend?: string) => {
+    const msgText = textToSend || globalChatInput;
+    if (!msgText.trim()) return;
+
+    const userMsg = {
+      id: String(Date.now()),
+      sender: 'user' as const,
+      text: msgText,
+    };
+    const updatedMessages = [...globalChatMessages, userMsg];
+    setGlobalChatMessages(updatedMessages);
+    setGlobalChatInput('');
+    setIsGlobalAiTyping(true);
+
+    try {
+      const systemPrompt = `You are Plantify AI Doctor, a general botanical expert.
+Help users with any general plant care advice, gardening tips, plant selection, disease symptoms, watering schedules, or general botanical questions.
+Since this is a general consultation, give friendly, extremely helpful, and scientifically accurate answers.
+If unsure, clearly say you're not certain.
+Never invent facts.
+Keep responses under 150 words.
+Use bullet points whenever useful.`;
+
+      const apiMessages = [
+        { role: 'system', content: systemPrompt },
+        ...updatedMessages.map((m) => ({
+          role: m.sender === 'user' ? 'user' : 'assistant',
+          content: m.text,
+        })),
+      ];
+
+      const apiKey = process.env.EXPO_PUBLIC_GROQ_API_KEY || process.env.GROQ_API_KEY || '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';
+      if (!apiKey) {
+        throw new Error('Groq API Key missing');
+      }
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: apiMessages,
+          temperature: 0.7,
+          max_tokens: 500,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Groq API HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const aiReply = data?.choices?.[0]?.message?.content?.trim();
+
+      if (aiReply) {
+        setGlobalChatMessages((prev) => [
+          ...prev,
+          {
+            id: String(Date.now() + 1),
+            sender: 'ai',
+            text: aiReply,
+          },
+        ]);
+      } else {
+        throw new Error('Empty reply');
+      }
+    } catch (error) {
+      console.warn('Groq API fetch failed:', error);
+      let responseText = `I apologize, I am having trouble connecting right now. Keep your plants in healthy light and avoid overwatering. Let me know if you have other questions!`;
+      setGlobalChatMessages((prev) => [
+        ...prev,
+        {
+          id: String(Date.now() + 1),
+          sender: 'ai',
+          text: responseText,
+        },
+      ]);
+    } finally {
+      setIsGlobalAiTyping(false);
+    }
+  };
 
   const handleHomeSearch = async (query: string) => {
     setHomeSearchQuery(query);
@@ -76,25 +196,47 @@ export default function HomeScreen() {
     evening: '6:00 PM',
   };
 
-  const dynamicNotifications = reminders.flatMap((rem: any, idx: number) => {
-    const items = [];
-    items.push({
-      id: `${idx}-water`,
-      title: `💧 Water ${rem.plantName}`,
-      body: `Scheduled ${FREQ_LABELS[rem.wateringFreq] || 'every 2 weeks'} at ${TIME_LABELS[rem.wateringTime] || '9:00 AM'}.`,
-      time: 'Active',
-      read: false,
+  const dynamicNotifications = savedPlants.map((plant: any, idx: number) => {
+    const matchingReminder = reminders.find((r: any) => r.plantName === plant.name);
+
+    // Calculate water countdown for this specific plant
+    const waterCountdown = getWateringCountdown({
+      lastWateredDate: plant.lastWateredDate || matchingReminder?.lastWatered,
+      watering: plant.watering,
+      name: plant.name,
     });
-    if (rem.fertilizerFreq !== 'none') {
-      items.push({
-        id: `${idx}-fert`,
-        title: `🌱 Fertilize ${rem.plantName}`,
-        body: `Scheduled ${FREQ_LABELS[rem.fertilizerFreq] || 'every 2 months'}.`,
-        time: 'Active',
-        read: false,
-      });
+
+    const isWateredToday = waterCountdown.status === 'watered_today';
+    const isSnoozedActive = matchingReminder?.snoozedUntil && Date.now() < matchingReminder.snoozedUntil;
+
+    let notificationTime = 'Due Today';
+    let notificationBody = `Requires hydration today — scheduled care.`;
+
+    if (isWateredToday) {
+      notificationTime = 'Completed';
+      notificationBody = `Plant has been hydrated today! Great job 🌿.`;
+    } else if (isSnoozedActive) {
+      notificationTime = 'Snoozed';
+      notificationBody = `Watering reminder snoozed until ${new Date(matchingReminder.snoozedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
+    } else if (waterCountdown.daysRemaining === 1) {
+      notificationTime = 'Due Tomorrow';
+      notificationBody = `Scheduled for watering tomorrow — prepare fresh water 💧.`;
+    } else if (waterCountdown.daysRemaining > 1) {
+      notificationTime = `Due in ${waterCountdown.daysRemaining} days`;
+      notificationBody = `Scheduled for watering in ${waterCountdown.daysRemaining} days.`;
     }
-    return items;
+
+    return {
+      id: `water-plant-${plant.id || idx}`,
+      title: isWateredToday ? `✅ ${plant.name} Watered` : `💧 Water ${plant.name}`,
+      body: notificationBody,
+      time: notificationTime,
+      read: isWateredToday,
+      type: 'water',
+      plantName: plant.name,
+      scientificName: plant.botanicalName || 'Dracaena trifasciata',
+      imageUri: plant.imageUri || '',
+    };
   });
 
   // Add scan notifications
@@ -104,6 +246,10 @@ export default function HomeScreen() {
     body: `${scan.botanicalName} — scan complete.`,
     time: scan.time || 'Recently',
     read: true,
+    type: 'scan',
+    plantName: scan.name,
+    scientificName: scan.botanicalName || '',
+    imageUri: scan.imageUri || '',
   }));
 
   const allNotifications = [...dynamicNotifications, ...scanNotifications];
@@ -183,6 +329,143 @@ export default function HomeScreen() {
 
 
 
+  const renderGlobalChatbotModal = () => {
+    return (
+      <Modal
+        visible={isGlobalChatVisible}
+        animationType="slide"
+        transparent={false}
+        statusBarTranslucent={true}
+        onRequestClose={() => setIsGlobalChatVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+          style={{ flex: 1, backgroundColor: '#F8FBF7' }}
+        >
+          <StatusBar style="light" backgroundColor="#1E5322" translucent={true} />
+
+          {/* Top Safe Area colored dark green to match header */}
+          <SafeAreaView edges={['top']} style={{ backgroundColor: '#1E5322' }} />
+
+          {/* Premium Header */}
+          <SafeAreaView edges={['top']} style={chatStyles.chatHeader}>
+            <View style={chatStyles.chatHeaderTopRow}>
+              <TouchableOpacity
+                style={chatStyles.chatBackBtn}
+                onPress={() => setIsGlobalChatVisible(false)}
+              >
+                <Ionicons name="close" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+              <Text style={chatStyles.chatHeaderTitle}>AI Doctor</Text>
+              <View style={{ width: 36 }} />
+            </View>
+          </SafeAreaView>
+
+          {/* Assistant Info Box */}
+          <View style={chatStyles.chatPlantCard}>
+            <Image
+              source={require('@/assets/images/disease.png')}
+              style={chatStyles.chatPlantThumb}
+              contentFit="cover"
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={chatStyles.chatPlantName}>Plantify AI Assistant</Text>
+              <Text style={chatStyles.chatPlantScientific}>General Botanical Expert</Text>
+            </View>
+          </View>
+
+          {/* Chat Messages List */}
+          <ScrollView
+            style={chatStyles.chatScrollView}
+            contentContainerStyle={chatStyles.chatScrollContent}
+            ref={(ref) => ref?.scrollToEnd({ animated: true })}
+          >
+            {globalChatMessages.map((msg) => (
+              <View
+                key={msg.id}
+                style={[
+                  chatStyles.msgWrapper,
+                  msg.sender === 'user' ? chatStyles.msgWrapperUser : chatStyles.msgWrapperAi
+                ]}
+              >
+                {msg.sender === 'ai' && (
+                  <View style={chatStyles.aiAvatar}>
+                    <Text style={{ fontSize: 14 }}>🩺</Text>
+                  </View>
+                )}
+                <View
+                  style={[
+                    chatStyles.msgBubble,
+                    msg.sender === 'user' ? chatStyles.msgBubbleUser : chatStyles.msgBubbleAi
+                  ]}
+                >
+                  <View style={{ flexShrink: 1 }}>
+                    {formatChatMessage(msg.text, msg.sender === 'user' ? chatStyles.msgTextUser : chatStyles.msgTextAi)}
+                  </View>
+                </View>
+              </View>
+            ))}
+
+            {isGlobalAiTyping && (
+              <View style={[chatStyles.msgWrapper, chatStyles.msgWrapperAi]}>
+                <View style={chatStyles.aiAvatar}>
+                  <Text style={{ fontSize: 14 }}>🩺</Text>
+                </View>
+                <View style={[chatStyles.msgBubble, chatStyles.msgBubbleAi, chatStyles.typingBubble]}>
+                  <Text style={[chatStyles.msgTextAi, { fontStyle: 'italic', color: '#8CA696' }]}>
+                    AI Doctor is thinking...
+                  </Text>
+                </View>
+              </View>
+            )}
+          </ScrollView>
+
+          {/* Suggestion Chips */}
+          <View style={chatStyles.chipsContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={chatStyles.chipsScroll}>
+              {[
+                { label: '🌱 General Care Tips', query: 'Can you give me some general indoor plant care tips?' },
+                { label: '💧 Watering Schedule', query: 'How do I know when a plant needs water?' },
+                { label: '🍂 Sick Plant Guide', query: 'My plant has brown/yellow leaves. What should I do?' },
+                { label: '🏡 Indoor vs Outdoor', query: 'How do I choose between indoor and outdoor plants?' },
+              ].map((chip, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={chatStyles.chipBtn}
+                  onPress={() => handleSendGlobalChatMessage(chip.query)}
+                >
+                  <Text style={chatStyles.chipText}>{chip.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          {/* Input Bar */}
+          <View style={chatStyles.inputBar}>
+            <TextInput
+              style={chatStyles.textInput}
+              placeholder="Ask AI Doctor a gardening question..."
+              placeholderTextColor="#8CA696"
+              value={globalChatInput}
+              onChangeText={setGlobalChatInput}
+              onSubmitEditing={() => handleSendGlobalChatMessage()}
+            />
+            <TouchableOpacity
+              style={chatStyles.sendBtn}
+              activeOpacity={0.8}
+              onPress={() => handleSendGlobalChatMessage()}
+            >
+              <Ionicons name="send" size={18} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Bottom Safe Area colored pure white */}
+          <SafeAreaView edges={['bottom']} style={{ backgroundColor: '#FFFFFF' }} />
+        </KeyboardAvoidingView>
+      </Modal>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar style="dark" />
@@ -207,6 +490,15 @@ export default function HomeScreen() {
             style={styles.notificationIconImage}
             contentFit="contain"
           />
+          {allNotifications.filter((n) => !n.read).length > 0 && (
+            <View style={styles.notiBadgeCount}>
+              <Text style={styles.notiBadgeCountText}>
+                {allNotifications.filter((n) => !n.read).length > 9
+                  ? '9+'
+                  : allNotifications.filter((n) => !n.read).length}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -234,7 +526,10 @@ export default function HomeScreen() {
                     <TextInput
                       placeholder="Search by name, family, genus..."
                       placeholderTextColor="#8CA696"
-                      style={styles.searchInput}
+                      style={[
+                        styles.searchInput,
+                        Platform.OS === 'web' && ({ outlineStyle: 'none', outlineWidth: 0 } as any)
+                      ]}
                       value={homeSearchQuery}
                       onChangeText={handleHomeSearch}
                       autoFocus
@@ -264,7 +559,7 @@ export default function HomeScreen() {
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Search Results ({homeSearchResults.length})</Text>
             </View>
-            
+
             {homeSearchResults.length === 0 ? (
               <View style={styles.searchEmptyContainer}>
                 <Text style={{ fontSize: 32, marginBottom: 12 }}>🔍</Text>
@@ -339,7 +634,10 @@ export default function HomeScreen() {
                 <TextInput
                   placeholder="Search by name, family, genus..."
                   placeholderTextColor="#8CA696"
-                  style={styles.searchInput}
+                  style={[
+                    styles.searchInput,
+                    Platform.OS === 'web' && ({ outlineStyle: 'none', outlineWidth: 0 } as any)
+                  ]}
                   value={homeSearchQuery}
                   onChangeText={handleHomeSearch}
                   onFocus={() => setIsSearchFocused(true)}
@@ -437,6 +735,9 @@ export default function HomeScreen() {
                 </View>
               </TouchableOpacity>
             </View>
+
+            {/* Weather Care Card - Sky Blue Container */}
+            <WeatherCareCard />
 
             {/* Recent Scans Section */}
             {recentScans.length > 0 && (
@@ -566,13 +867,31 @@ export default function HomeScreen() {
                 </View>
               ) : (
                 allNotifications.map((item) => (
-                  <View key={item.id} style={[styles.notiItem, !item.read && styles.notiUnread]}>
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.notiItem, !item.read && styles.notiUnread]}
+                    activeOpacity={item.time === 'Completed' ? 1 : 0.8}
+                    disabled={item.time === 'Completed'}
+                    onPress={() => {
+                      if (item.type === 'water') {
+                        closeNotifications();
+                        router.push({
+                          pathname: '/smart-watering',
+                          params: {
+                            plantName: item.plantName,
+                            scientificName: item.scientificName,
+                            imageUri: item.imageUri ? encodeURIComponent(item.imageUri) : '',
+                          }
+                        });
+                      }
+                    }}
+                  >
                     <View style={styles.notiHeaderRow}>
                       <Text style={styles.notiTitle}>{item.title}</Text>
                       <Text style={styles.notiTime}>{item.time}</Text>
                     </View>
                     <Text style={styles.notiBody}>{item.body}</Text>
-                  </View>
+                  </TouchableOpacity>
                 ))
               )}
             </ScrollView>
@@ -691,6 +1010,17 @@ export default function HomeScreen() {
           />
         </SafeAreaView>
       </Modal>
+
+      {/* Floating Ask AI Button */}
+      <TouchableOpacity
+        style={styles.floatingAskAiBtn}
+        activeOpacity={0.85}
+        onPress={() => setIsGlobalChatVisible(true)}
+      >
+        <Ionicons name="sparkles" size={24} color="#FFFFFF" />
+      </TouchableOpacity>
+
+      {renderGlobalChatbotModal()}
     </SafeAreaView>
   );
 }
@@ -730,6 +1060,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#F8FBF7',
+    position: 'relative',
+  },
+  notiBadgeCount: {
+    position: 'absolute',
+    top: -1,
+    right: -1,
+    backgroundColor: '#DC2626',
+    borderRadius: 9,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    elevation: 3,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+  },
+  notiBadgeCountText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   notificationIconImage: {
     width: 24,
@@ -1159,7 +1515,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: width * 0.75,
     backgroundColor: '#FFFFFF',
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingTop: 40,
     paddingHorizontal: 20,
     shadowColor: '#1C3A27',
     shadowOffset: { width: -4, height: 0 },
@@ -1559,5 +1915,246 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 20,
     paddingBottom: 40,
+  },
+  floatingAskAiBtn: {
+    position: 'absolute',
+    bottom: 76,
+    right: 20,
+    backgroundColor: '#1E1E20', // light black / premium dark charcoal
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+});
+
+const chatStyles = StyleSheet.create({
+  chatContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  chatHeader: {
+    backgroundColor: '#1E5322',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 16,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
+    shadowColor: '#1E5322',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  chatHeaderTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  chatBackBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chatHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    flex: 1,
+    textAlign: 'center',
+  },
+  chatPlantCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 10,
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 6,
+    borderWidth: 1.2,
+    borderColor: '#D0E0CE',
+    borderLeftWidth: 4,
+    borderLeftColor: '#1E5322',
+    shadowColor: '#1C3A27',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  chatPlantThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#D0E0CE',
+    backgroundColor: '#F8FBF7',
+  },
+  chatPlantName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1C3A27',
+  },
+  chatPlantScientific: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: '#718E7B',
+    marginTop: 1,
+  },
+  chatScrollView: {
+    flex: 1,
+    paddingHorizontal: 16,
+    backgroundColor: '#F8FBF7',
+  },
+  chatScrollContent: {
+    paddingVertical: 16,
+  },
+  msgWrapper: {
+    flexDirection: 'row',
+    marginBottom: 16,
+    maxWidth: '92%',
+  },
+  msgWrapperUser: {
+    alignSelf: 'flex-end',
+    justifyContent: 'flex-end',
+  },
+  msgWrapperAi: {
+    alignSelf: 'flex-start',
+    justifyContent: 'flex-start',
+    paddingRight: 12,
+  },
+  aiAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#EBF4EA',
+    borderWidth: 1.2,
+    borderColor: '#C0DCCA',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+    marginTop: 2,
+    shadowColor: '#1C3A27',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  msgBubble: {
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexShrink: 1,
+  },
+  msgBubbleUser: {
+    backgroundColor: '#1E5322',
+    borderBottomRightRadius: 4,
+    shadowColor: '#1E5322',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  msgBubbleAi: {
+    backgroundColor: '#FFFFFF',
+    borderBottomLeftRadius: 4,
+    borderWidth: 1.2,
+    borderColor: '#E2EBE0',
+    shadowColor: '#1C3A27',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  typingBubble: {
+    backgroundColor: '#F3F8F2',
+    borderColor: '#E2EBE0',
+  },
+  msgTextUser: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '700',
+    lineHeight: 20,
+    flexShrink: 1,
+  },
+  msgTextAi: {
+    color: '#1C3A27',
+    fontSize: 13.5,
+    fontWeight: '600',
+    lineHeight: 20,
+    flexShrink: 1,
+  },
+  chipsContainer: {
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F5EF',
+    backgroundColor: '#FFFFFF',
+  },
+  chipsScroll: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  chipBtn: {
+    backgroundColor: '#F3F8F2',
+    borderWidth: 1.2,
+    borderColor: '#D0E0CE',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    shadowColor: '#1C3A27',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  chipText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#1C3A27',
+  },
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F5EF',
+    backgroundColor: '#FFFFFF',
+    gap: 10,
+  },
+  textInput: {
+    flex: 1,
+    backgroundColor: '#F8FBF7',
+    borderWidth: 1.2,
+    borderColor: '#D0E0CE',
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    fontSize: 13.5,
+    color: '#1C3A27',
+    fontWeight: '600',
+  },
+  sendBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#1E5322',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#1E5322',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 3,
   },
 });

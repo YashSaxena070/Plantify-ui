@@ -65,32 +65,55 @@ export default function NearbyPlantsScreen() {
   };
 
   useEffect(() => {
+    initInstantPlants();
     fetchLocationAndPlants();
   }, []);
 
+  const initInstantPlants = async () => {
+    try {
+      const plants = await plantService.getAllPlants();
+      setAllPlants(plants);
+      if (plants && plants.length > 0) {
+        setRecommendedPlants(plants.slice(0, 8));
+        setLoading(false);
+      }
+    } catch (e) {
+      console.warn('Instant plants load error:', e);
+      setLoading(false);
+    }
+  };
+
   const fetchLocationAndPlants = async () => {
-    setLoading(true);
     setLocationError(null);
     let coords = { latitude: defaultLocation.latitude, longitude: defaultLocation.longitude };
     let locDetails: LocationInfo = defaultLocation;
 
     try {
-      // 1. Check & Request permissions
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        coords = {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        };
+        // Fast check for last known position first (returns in <5ms)
+        let lastLoc = await Location.getLastKnownPositionAsync().catch(() => null);
+        
+        if (!lastLoc) {
+          // Timeout race so user is never kept waiting
+          const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200));
+          const locationPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+          const res = await Promise.race([locationPromise, timeoutPromise]);
+          if (res) lastLoc = res;
+        }
 
-        // 2. Reverse Geocode
+        if (lastLoc) {
+          coords = {
+            latitude: lastLoc.coords.latitude,
+            longitude: lastLoc.coords.longitude,
+          };
+        }
+
+        // Reverse Geocode non-blockingly
         const geocode = await Location.reverseGeocodeAsync({
           latitude: coords.latitude,
           longitude: coords.longitude,
-        });
+        }).catch(() => null);
 
         if (geocode && geocode.length > 0) {
           const first = geocode[0];

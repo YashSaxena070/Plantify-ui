@@ -34,14 +34,6 @@ export default function CareScreen() {
       <StatusBar style="dark" />
       <View style={styles.header}>
         <Text style={styles.title}>Care Schedule</Text>
-        <TouchableOpacity style={styles.calendarToggle}>
-          <Image
-            source={require('@/assets/images/care.png')}
-            style={{ width: 22, height: 22 }}
-            tintColor="#4E8C44"
-            contentFit="contain"
-          />
-        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>

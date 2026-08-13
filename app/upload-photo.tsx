@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Dimensions, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
@@ -17,6 +17,10 @@ const TIPS = [
 
 export default function UploadPhotoScreen() {
   const router = useRouter();
+  const { isRescan, targetPlantName } = useLocalSearchParams<{
+    isRescan?: string;
+    targetPlantName?: string;
+  }>();
 
   const handleSelectPhoto = async () => {
     try {
@@ -40,7 +44,11 @@ export default function UploadPhotoScreen() {
         const selectedUri = result.assets[0].uri;
         router.push({
           pathname: '/upload-progress',
-          params: { imageUri: selectedUri }
+          params: {
+            imageUri: selectedUri,
+            isRescan: isRescan || '',
+            targetPlantName: targetPlantName || '',
+          }
         });
       }
     } catch (error) {
@@ -50,7 +58,13 @@ export default function UploadPhotoScreen() {
   };
 
   const handleCameraPress = () => {
-    router.push('/camera');
+    router.push({
+      pathname: '/camera',
+      params: {
+        isRescan: isRescan || '',
+        targetPlantName: targetPlantName || '',
+      }
+    });
   };
 
   return (
@@ -92,7 +106,7 @@ export default function UploadPhotoScreen() {
             contentFit="contain"
           />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Upload Photo</Text>
+        <Text style={styles.headerTitle}>{isRescan === 'true' ? 'Rescan Plant Photo' : 'Upload Photo'}</Text>
         <TouchableOpacity style={styles.headerBtn}>
           <Text style={{ fontSize: 20, fontWeight: '700', color: '#1C3A27' }}>?</Text>
         </TouchableOpacity>

@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState, useRef } from 'react';
 import { Animated, Dimensions, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator } from 'react-native';
@@ -12,6 +12,7 @@ const MODES = ['Plant', 'Flower', 'Fruit'];
 
 export default function CameraScreen() {
   const router = useRouter();
+  const { isRescan, targetPlantName } = useLocalSearchParams<{ isRescan?: string; targetPlantName?: string }>();
   const [activeMode, setActiveMode] = useState('Plant');
   const [flashOn, setFlashOn] = useState(false);
   const [facing, setFacing] = useState<'back' | 'front'>('back');
@@ -43,7 +44,11 @@ export default function CameraScreen() {
         if (photo && photo.uri) {
           router.push({
             pathname: '/upload-progress',
-            params: { imageUri: photo.uri }
+            params: { 
+              imageUri: photo.uri,
+              isRescan: isRescan || '',
+              targetPlantName: targetPlantName || '',
+            }
           });
         }
       } catch (err) {
@@ -179,7 +184,13 @@ export default function CameraScreen() {
         <TouchableOpacity
           style={styles.controlBtn}
           activeOpacity={0.7}
-          onPress={() => router.push('/upload-photo')}
+          onPress={() => router.push({
+            pathname: '/upload-photo',
+            params: {
+              isRescan: isRescan || '',
+              targetPlantName: targetPlantName || '',
+            }
+          })}
         >
           <View style={styles.controlIconBg}>
             <Image
